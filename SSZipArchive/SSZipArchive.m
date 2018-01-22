@@ -646,13 +646,13 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
 }
 
 #pragma mark - Zipping
-+ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
++ (SSZipArchive*)createZipArchiveWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
 {
     SSZipArchive *zipArchive = [[SSZipArchive alloc] initWithPath:@""];
     zipArchive.io_delegate = delegate;
     BOOL success = [zipArchive openCallback];
     
-    return success;
+    return success ? zipArchive : nil;
 }
 
 + (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
@@ -916,6 +916,46 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     
     zipCloseFileInZip(_zip);
     return error == ZIP_OK;
+}
+
+- (BOOL)openZipEntryWithFilename:(nullable NSString *)filename withPassword:(nullable NSString *)password {
+    return [self openZipEntryWithFilename:filename compressionLevel:Z_DEFAULT_COMPRESSION password:password AES:YES];
+}
+
+- (BOOL)openZipEntryWithFilename:(nullable NSString *)filename compressionLevel:(int)compressionLevel password:(nullable NSString *)password AES:(BOOL)aes {
+    if (!_zip) {
+        return NO;
+    }
+    
+    zip_fileinfo zipInfo = {};
+    [SSZipArchive zipInfo:&zipInfo setDate:[NSDate date]];
+    
+    int error = _zipOpenEntry(_zip, filename, &zipInfo, compressionLevel, password, aes);
+    
+    return error == ZIP_OK;
+}
+
+- (BOOL)writeZipEntryData:(NSData*)data {
+    if (!_zip) {
+        return NO;
+    }
+    if (!data) {
+        return NO;
+    }
+    
+    zipWriteInFileInZip(_zip, data.bytes, (unsigned int)data.length);
+    
+    return YES;
+}
+
+- (BOOL)closeZipEntry {
+    if (!_zip) {
+        return NO;
+    }
+    
+    zipCloseFileInZip(_zip);
+    
+    return YES;
 }
 
 - (BOOL)close

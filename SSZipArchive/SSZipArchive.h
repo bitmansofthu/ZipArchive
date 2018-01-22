@@ -85,7 +85,7 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 // default compression level is Z_DEFAULT_COMPRESSION (from "zlib.h")
 
 // without password
-+ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate;
++ (instancetype)createZipArchiveWithIODelegate:(id<SSZipArchiveIODelegate>)delegate;
 + (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
         withContentsOfDirectory:(NSString *)directoryPath
             keepParentDirectory:(BOOL)keepParentDirectory
@@ -130,6 +130,12 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 /// write data
 - (BOOL)writeData:(NSData *)data filename:(nullable NSString *)filename withPassword:(nullable NSString *)password;
 - (BOOL)writeData:(NSData *)data filename:(nullable NSString *)filename compressionLevel:(int)compressionLevel password:(nullable NSString *)password AES:(BOOL)aes;
+
+/// write entry
+- (BOOL)openZipEntryWithFilename:(nullable NSString *)filename withPassword:(nullable NSString *)password;
+- (BOOL)openZipEntryWithFilename:(nullable NSString *)filename compressionLevel:(int)compressionLevel password:(nullable NSString *)password AES:(BOOL)aes;
+- (BOOL)writeZipEntryData:(NSData*)data;
+- (BOOL)closeZipEntry;
 
 - (BOOL)close;
 
