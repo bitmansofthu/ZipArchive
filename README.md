@@ -1,6 +1,4 @@
 
-[![Build Status](https://travis-ci.org/ZipArchive/ZipArchive.svg?branch=master)](https://travis-ci.org/ZipArchive/ZipArchive)
-
 # SSZipArchive
 
 ZipArchive is a simple utility class for zipping and unzipping files on iOS, macOS and tvOS.
@@ -14,6 +12,8 @@ ZipArchive is a simple utility class for zipping and unzipping files on iOS, mac
 - Choose compression level;
 - Append to existing zip files;
 - Zip-up NSData instances. (with a filename)
+
+This fork adds the ability to handle written data as a stream via delegate calls.
 
 ## Installation and Setup
 
@@ -43,6 +43,28 @@ SSZipArchive requires ARC.
 ```objective-c
 // Create
 [SSZipArchive createZipFileAtPath:zipPath withContentsOfDirectory:sampleDataPath];
+
+// or to delegate
+[SSZipArchive createZipWithIODelegate:self
+              withContentsOfDirectory:sampleDataPath
+              keepParentDirectory:NO
+              compressionLevel:-1
+              password:password.length > 0 ? password : nil
+              AES:YES
+              progressHandler:nil];
+
+// handle write delegate
+- (uint32_t)zipArchiveDidWriteData:(NSData *)data {    
+    // e.g. write data stream to a file
+    // [_zipfile writeData:data];
+    
+    return (uint32_t)[data length];
+}
+
+- (void)zipArchiveDidClose {
+    // e.g. close file
+    // [_zipfile closeFile];
+}
 
 // Unzip
 [SSZipArchive unzipFileAtPath:zipPath toDestination:unzipPath];
