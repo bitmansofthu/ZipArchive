@@ -899,6 +899,240 @@ extern zipFile ZEXPORT zipOpen(const char *path, int append)
     return zipOpen3((const void*)path, append, 0, NULL, NULL);
 }
 
+extern zipFile ZEXPORT zipOpenCallback(voidpf write_delegate_object, int append)
+{
+    zip64_internal ziinit = { 0 };
+    zip64_internal *zi = NULL;
+#ifndef NO_ADDFILEINEXISTINGZIP
+    uint64_t byte_before_the_zipfile = 0;   /* byte before the zipfile, (>0 for sfx)*/
+    uint64_t size_central_dir = 0;          /* size of the central directory  */
+    uint64_t offset_central_dir = 0;        /* offset of start of central directory */
+    uint64_t number_entry_CD = 0;           /* total number of entries in the central dir */
+    uint64_t number_entry = 0;
+    uint64_t central_pos = 0;
+    uint64_t size_central_dir_to_read = 0;
+    uint16_t value16 = 0;
+    uint32_t value32 = 0;
+    uint16_t size_comment = 0;
+    size_t buf_size = SIZEDATA_INDATABLOCK;
+    void *buf_read = NULL;
+#endif
+    int err = ZIP_OK;
+    int mode = 0;
+    
+    fill_callback64_filefunc(&ziinit.z_filefunc.zfile_func64);
+    
+    if (append == APPEND_STATUS_CREATE)
+        mode = (ZLIB_FILEFUNC_MODE_READ | ZLIB_FILEFUNC_MODE_WRITE | ZLIB_FILEFUNC_MODE_CREATE);
+    else
+        mode = (ZLIB_FILEFUNC_MODE_READ | ZLIB_FILEFUNC_MODE_WRITE | ZLIB_FILEFUNC_MODE_EXISTING);
+    
+    ziinit.filestream = write_delegate_object;
+    if (ziinit.filestream == NULL)
+        return NULL;
+    
+    if (append == APPEND_STATUS_CREATEAFTER)
+    {
+        ZSEEK64(ziinit.z_filefunc, ziinit.filestream, 0, SEEK_END);
+    }
+    
+    ziinit.filestream_with_CD = ziinit.filestream;
+    ziinit.append = append;
+    ziinit.disk_size = 0;
+    init_linkedlist(&(ziinit.central_dir));
+    
+    zi = (zip64_internal*)ALLOC(sizeof(zip64_internal));
+    if (zi == NULL)
+    {
+        ZCLOSE64(ziinit.z_filefunc, ziinit.filestream);
+        return NULL;
+    }
+    
+#ifndef NO_ADDFILEINEXISTINGZIP
+    /* Add file in a zipfile */
+    ziinit.globalcomment = NULL;
+    if (append == APPEND_STATUS_ADDINZIP)
+    {
+        /* Read and Cache Central Directory Records */
+        central_pos = zipSearchCentralDir(&ziinit.z_filefunc, ziinit.filestream);
+        /* Disable to allow appending to empty ZIP archive (must be standard zip, not zip64)
+         if (central_pos == 0)
+         err = ZIP_ERRNO;
+         */
+        
+        if (err == ZIP_OK)
+        {
+            /* Read end of central directory info */
+            if (ZSEEK64(ziinit.z_filefunc, ziinit.filestream, central_pos, ZLIB_FILEFUNC_SEEK_SET) != 0)
+                err = ZIP_ERRNO;
+            
+            /* The signature, already checked */
+            if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &value32) != ZIP_OK)
+                err = ZIP_ERRNO;
+            /* Number of this disk */
+            if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                err = ZIP_ERRNO;
+            ziinit.number_disk = value16;
+            /* Number of the disk with the start of the central directory */
+            if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                err = ZIP_ERRNO;
+            ziinit.number_disk_with_CD = value16;
+            /* Total number of entries in the central dir on this disk */
+            number_entry = 0;
+            if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                err = ZIP_ERRNO;
+            else
+                number_entry = value16;
+            /* Total number of entries in the central dir */
+            number_entry_CD = 0;
+            if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                err = ZIP_ERRNO;
+            else
+                number_entry_CD = value16;
+            if (number_entry_CD!=number_entry)
+                err = ZIP_BADZIPFILE;
+            /* Size of the central directory */
+            size_central_dir = 0;
+            if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &value32) != ZIP_OK)
+                err = ZIP_ERRNO;
+            else
+                size_central_dir = value32;
+            /* Offset of start of central directory with respect to the starting disk number */
+            offset_central_dir = 0;
+            if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &value32) != ZIP_OK)
+                err = ZIP_ERRNO;
+            else
+                offset_central_dir = value32;
+            /* Zipfile global comment length */
+            if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &size_comment) != ZIP_OK)
+                err = ZIP_ERRNO;
+            
+            if ((err == ZIP_OK) && ((number_entry_CD == UINT16_MAX) || (offset_central_dir == UINT32_MAX)))
+            {
+                /* Format should be Zip64, as the central directory or file size is too large */
+                central_pos = zipSearchCentralDir64(&ziinit.z_filefunc, ziinit.filestream, central_pos);
+                
+                if (central_pos)
+                {
+                    uint64_t sizeEndOfCentralDirectory;
+                    
+                    if (ZSEEK64(ziinit.z_filefunc, ziinit.filestream, central_pos, ZLIB_FILEFUNC_SEEK_SET) != 0)
+                        err = ZIP_ERRNO;
+                    
+                    /* The signature, already checked */
+                    if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &value32) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Size of zip64 end of central directory record */
+                    if (zipReadUInt64(&ziinit.z_filefunc, ziinit.filestream, &sizeEndOfCentralDirectory) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Version made by */
+                    if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Version needed to extract */
+                    if (zipReadUInt16(&ziinit.z_filefunc, ziinit.filestream, &value16) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Number of this disk */
+                    if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &ziinit.number_disk) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Number of the disk with the start of the central directory */
+                    if (zipReadUInt32(&ziinit.z_filefunc, ziinit.filestream, &ziinit.number_disk_with_CD) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Total number of entries in the central directory on this disk */
+                    if (zipReadUInt64(&ziinit.z_filefunc, ziinit.filestream, &number_entry) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Total number of entries in the central directory */
+                    if (zipReadUInt64(&ziinit.z_filefunc, ziinit.filestream, &number_entry_CD) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    if (number_entry_CD!=number_entry)
+                        err = ZIP_BADZIPFILE;
+                    /* Size of the central directory */
+                    if (zipReadUInt64(&ziinit.z_filefunc, ziinit.filestream, &size_central_dir) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                    /* Offset of start of central directory with respect to the starting disk number */
+                    if (zipReadUInt64(&ziinit.z_filefunc, ziinit.filestream, &offset_central_dir) != ZIP_OK)
+                        err = ZIP_ERRNO;
+                }
+                else
+                    err = ZIP_BADZIPFILE;
+            }
+        }
+        
+        if ((err == ZIP_OK) && (central_pos < offset_central_dir + size_central_dir))
+            err = ZIP_BADZIPFILE;
+        
+        if ((err == ZIP_OK) && (size_comment > 0))
+        {
+            ziinit.globalcomment = (char*)ALLOC(size_comment+1);
+            if (ziinit.globalcomment)
+            {
+                if (ZREAD64(ziinit.z_filefunc, ziinit.filestream, ziinit.globalcomment, size_comment) != size_comment)
+                    err = ZIP_ERRNO;
+                else
+                    ziinit.globalcomment[size_comment] = 0;
+            }
+        }
+        
+        if (err != ZIP_OK)
+        {
+            ZCLOSE64(ziinit.z_filefunc, ziinit.filestream);
+            TRYFREE(ziinit.globalcomment);
+            TRYFREE(zi);
+            return NULL;
+        }
+        
+        byte_before_the_zipfile = central_pos - (offset_central_dir+size_central_dir);
+        ziinit.add_position_when_writting_offset = byte_before_the_zipfile;
+        
+        /* Store central directory in memory */
+        size_central_dir_to_read = size_central_dir;
+        buf_size = SIZEDATA_INDATABLOCK;
+        buf_read = (void*)ALLOC(buf_size);
+        
+        if (ZSEEK64(ziinit.z_filefunc, ziinit.filestream,
+                    offset_central_dir + byte_before_the_zipfile, ZLIB_FILEFUNC_SEEK_SET) != 0)
+            err = ZIP_ERRNO;
+        
+        while ((size_central_dir_to_read > 0) && (err == ZIP_OK))
+        {
+            uint64_t read_this = SIZEDATA_INDATABLOCK;
+            if (read_this > size_central_dir_to_read)
+                read_this = size_central_dir_to_read;
+            
+            if (ZREAD64(ziinit.z_filefunc, ziinit.filestream, buf_read, (uint32_t)read_this) != read_this)
+                err = ZIP_ERRNO;
+            
+            if (err == ZIP_OK)
+                err = add_data_in_datablock(&ziinit.central_dir, buf_read, (uint32_t)read_this);
+            
+            size_central_dir_to_read -= read_this;
+        }
+        TRYFREE(buf_read);
+        
+        ziinit.number_entry = number_entry_CD;
+        
+        if (ZSEEK64(ziinit.z_filefunc, ziinit.filestream,
+                    offset_central_dir+byte_before_the_zipfile, ZLIB_FILEFUNC_SEEK_SET) != 0)
+            err = ZIP_ERRNO;
+    }
+    
+    //if (globalcomment)
+    //    *globalcomment = ziinit.globalcomment;
+#endif
+    
+    if (err != ZIP_OK)
+    {
+#ifndef NO_ADDFILEINEXISTINGZIP
+        TRYFREE(ziinit.globalcomment);
+#endif
+        TRYFREE(zi);
+        return NULL;
+    }
+    
+    *zi = ziinit;
+    zipGoToFirstDisk((zipFile)zi);
+    return(zipFile)zi;
+}
+
 extern zipFile ZEXPORT zipOpen64(const void *path, int append)
 {
     return zipOpen3(path, append, 0, NULL, NULL);

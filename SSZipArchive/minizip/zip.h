@@ -77,6 +77,7 @@ typedef struct
 
 extern zipFile ZEXPORT zipOpen(const char *path, int append);
 extern zipFile ZEXPORT zipOpen64(const void *path, int append);
+extern zipFile ZEXPORT zipOpenCallback(voidpf write_delegate_object, int append);
 /* Create a zipfile.
 
    path should contain the full path (by example, on a Windows XP computer 

@@ -25,6 +25,7 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 };
 
 @protocol SSZipArchiveDelegate;
+@protocol SSZipArchiveIODelegate;
 
 @interface SSZipArchive : NSObject
 
@@ -84,6 +85,15 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 // default compression level is Z_DEFAULT_COMPRESSION (from "zlib.h")
 
 // without password
++ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate;
++ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
+        withContentsOfDirectory:(NSString *)directoryPath
+            keepParentDirectory:(BOOL)keepParentDirectory
+               compressionLevel:(int)compressionLevel
+                       password:(nullable NSString *)password
+                            AES:(BOOL)aes
+                progressHandler:(void(^ _Nullable)(NSUInteger entryNumber, NSUInteger total))progressHandler;
+
 + (BOOL)createZipFileAtPath:(NSString *)path withFilesAtPaths:(NSArray<NSString *> *)paths;
 + (BOOL)createZipFileAtPath:(NSString *)path withContentsOfDirectory:(NSString *)directoryPath;
 
@@ -138,6 +148,14 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 - (void)zipArchiveDidUnzipFileAtIndex:(NSInteger)fileIndex totalFiles:(NSInteger)totalFiles archivePath:(NSString *)archivePath unzippedFilePath:(NSString *)unzippedFilePath;
 
 - (void)zipArchiveProgressEvent:(unsigned long long)loaded total:(unsigned long long)total;
+
+@end
+
+@protocol SSZipArchiveIODelegate <NSObject>
+
+- (uint32_t)zipArchiveDidWriteData:(NSData*)data;
+
+- (void)zipArchiveDidClose;
 
 @end
 

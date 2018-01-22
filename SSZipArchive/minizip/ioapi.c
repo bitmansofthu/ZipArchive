@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <objc/message.h>
+#include <objc/runtime.h>
+
 #if defined unix || defined __APPLE__
 #include <sys/types.h>
 #include <unistd.h>
@@ -208,6 +211,13 @@ static uint32_t ZCALLBACK fread_file_func(ZIP_UNUSED voidpf opaque, voidpf strea
     return read;
 }
 
+static uint32_t ZCALLBACK fread_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream, void* buf, uint32_t size)
+{
+    uint32_t len = (uint32_t*)objc_msgSend(stream, sel_getUid("zipreadWithBuf:size:"), buf, size);
+    
+    return len;
+}
+
 static uint32_t ZCALLBACK fwrite_file_func(ZIP_UNUSED voidpf opaque, voidpf stream, const void *buf, uint32_t size)
 {
     FILE_IOPOSIX *ioposix = NULL;
@@ -219,6 +229,13 @@ static uint32_t ZCALLBACK fwrite_file_func(ZIP_UNUSED voidpf opaque, voidpf stre
     return written;
 }
 
+static uint32_t ZCALLBACK fwrite_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream, const void *buf, uint32_t size)
+{
+    uint32_t len = (uint32_t)objc_msgSend(stream, sel_getUid("zipwriteWithBuf:size:"), buf, size);
+    
+    return len;
+}
+
 static long ZCALLBACK ftell_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
 {
     FILE_IOPOSIX *ioposix = NULL;
@@ -227,6 +244,13 @@ static long ZCALLBACK ftell_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
         return ret;
     ioposix = (FILE_IOPOSIX*)stream;
     ret = ftell(ioposix->file);
+    return ret;
+}
+
+static uint64_t ZCALLBACK ftell64_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream)
+{
+    uint64_t ret = (uint64_t)objc_msgSend(stream, sel_getUid("ziptell"));
+
     return ret;
 }
 
@@ -301,6 +325,13 @@ static long ZCALLBACK fseek64_file_func(ZIP_UNUSED voidpf opaque, voidpf stream,
     return ret;
 }
 
+static long ZCALLBACK fseek64_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream, uint64_t offset, int origin)
+{
+    long ret = objc_msgSend(stream, sel_getUid("zipseekWithOffset:origin:"), offset, origin);
+    
+    return ret;
+}
+
 static int ZCALLBACK fclose_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
 {
     FILE_IOPOSIX *ioposix = NULL;
@@ -315,6 +346,13 @@ static int ZCALLBACK fclose_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
     return ret;
 }
 
+static int ZCALLBACK fclose_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream)
+{
+    objc_msgSend(stream, sel_getUid("zipclose"));
+    
+    return 0;
+}
+
 static int ZCALLBACK ferror_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
 {
     FILE_IOPOSIX *ioposix = NULL;
@@ -324,6 +362,11 @@ static int ZCALLBACK ferror_file_func(ZIP_UNUSED voidpf opaque, voidpf stream)
     ioposix = (FILE_IOPOSIX*)stream;
     ret = ferror(ioposix->file);
     return ret;
+}
+
+static int ZCALLBACK ferror_callback_func(ZIP_UNUSED voidpf opaque, voidpf stream)
+{
+    return 0;
 }
 
 void fill_fopen_filefunc(zlib_filefunc_def *pzlib_filefunc_def)
@@ -351,3 +394,17 @@ void fill_fopen64_filefunc(zlib_filefunc64_def *pzlib_filefunc_def)
     pzlib_filefunc_def->zerror_file = ferror_file_func;
     pzlib_filefunc_def->opaque = NULL;
 }
+
+void fill_callback64_filefunc(zlib_filefunc64_def *pzlib_filefunc_def)
+{
+    pzlib_filefunc_def->zopen64_file = fopen64_file_func;
+    pzlib_filefunc_def->zopendisk64_file = fopendisk64_file_func;
+    pzlib_filefunc_def->zread_file = fread_callback_func;
+    pzlib_filefunc_def->zwrite_file = fwrite_callback_func;
+    pzlib_filefunc_def->ztell64_file = ftell64_callback_func;
+    pzlib_filefunc_def->zseek64_file = fseek64_callback_func;
+    pzlib_filefunc_def->zclose_file = fclose_callback_func;
+    pzlib_filefunc_def->zerror_file = ferror_callback_func;
+    pzlib_filefunc_def->opaque = NULL;
+}
+

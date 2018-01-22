@@ -32,6 +32,8 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
 
 @interface SSZipArchive ()
 - (instancetype)init NS_DESIGNATED_INITIALIZER;
+
+@property id<SSZipArchiveIODelegate> io_delegate;
 @end
 
 @implementation SSZipArchive
@@ -39,6 +41,8 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     /// path for zip file
     NSString *_path;
     zipFile _zip;
+    
+    uint64_t callback_file_pos;
 }
 
 #pragma mark - Password check
@@ -642,6 +646,65 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
 }
 
 #pragma mark - Zipping
++ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
+{
+    SSZipArchive *zipArchive = [[SSZipArchive alloc] initWithPath:@""];
+    zipArchive.io_delegate = delegate;
+    BOOL success = [zipArchive openCallback];
+    
+    return success;
+}
+
++ (BOOL)createZipWithIODelegate:(id<SSZipArchiveIODelegate>)delegate
+        withContentsOfDirectory:(NSString *)directoryPath
+            keepParentDirectory:(BOOL)keepParentDirectory
+               compressionLevel:(int)compressionLevel
+                       password:(nullable NSString *)password
+                            AES:(BOOL)aes
+                progressHandler:(void(^ _Nullable)(NSUInteger entryNumber, NSUInteger total))progressHandler
+{
+    SSZipArchive *zipArchive = [[SSZipArchive alloc] initWithPath:@""];
+    zipArchive.io_delegate = delegate;
+    BOOL success = [zipArchive openCallback];
+    
+    if (success) {
+        // use a local fileManager (queue/thread compatibility)
+        NSFileManager *fileManager = [[NSFileManager alloc] init];
+        NSDirectoryEnumerator *dirEnumerator = [fileManager enumeratorAtPath:directoryPath];
+        NSArray<NSString *> *allObjects = dirEnumerator.allObjects;
+        NSUInteger total = allObjects.count, complete = 0;
+        NSString *fileName;
+        for (fileName in allObjects) {
+            BOOL isDir;
+            NSString *fullFilePath = [directoryPath stringByAppendingPathComponent:fileName];
+            [fileManager fileExistsAtPath:fullFilePath isDirectory:&isDir];
+            
+            if (keepParentDirectory)
+            {
+                fileName = [directoryPath.lastPathComponent stringByAppendingPathComponent:fileName];
+            }
+            
+            if (!isDir) {
+                success &= [zipArchive writeFileAtPath:fullFilePath withFileName:fileName compressionLevel:compressionLevel password:password AES:aes];
+            }
+            else
+            {
+                if ([[NSFileManager defaultManager] subpathsOfDirectoryAtPath:fullFilePath error:nil].count == 0)
+                {
+                    success &= [zipArchive writeFolderAtPath:fullFilePath withFolderName:fileName withPassword:password];
+                }
+            }
+            complete++;
+            if (progressHandler) {
+                progressHandler(complete, total);
+            }
+        }
+        success &= [zipArchive close];
+    }
+    
+    return success;
+}
+
 + (BOOL)createZipFileAtPath:(NSString *)path withFilesAtPaths:(NSArray<NSString *> *)paths
 {
     return [SSZipArchive createZipFileAtPath:path withFilesAtPaths:paths withPassword:nil];
@@ -748,11 +811,20 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     return self;
 }
 
-
 - (BOOL)open
 {
     NSAssert((_zip == NULL), @"Attempting to open an archive which is already open");
     _zip = zipOpen(_path.fileSystemRepresentation, APPEND_STATUS_CREATE);
+    return (NULL != _zip);
+}
+
+- (BOOL)openCallback
+{
+    NSAssert((_zip == NULL), @"Attempting to open an archive which is already open");
+    _zip = zipOpenCallback((__bridge voidpf)(self), APPEND_STATUS_CREATE);
+    
+    callback_file_pos = 0;
+    
     return (NULL != _zip);
 }
 
@@ -990,6 +1062,38 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     
     NSDate *date = [self._gregorian dateFromComponents:components];
     return date;
+}
+
+#pragma mark - Callback delegate
+
+- (uint32_t)zipwriteWithBuf:(const void *)buf size:(uint32_t)size {
+    if ([self.io_delegate respondsToSelector:@selector(zipArchiveDidWriteData:)]) {
+        NSData* data = [NSData dataWithBytes:(void *)buf length:size];
+        
+        callback_file_pos += data.length;
+        
+        return [self.io_delegate zipArchiveDidWriteData:data];
+    }
+    
+    return 0;
+}
+
+- (uint32_t)zipreadWithBuf:(void *)buf size:(uint32_t)size {
+    return 0;
+}
+
+- (long)zipseekWithOffset:(uint64_t)offset origin:(int)origin {
+    return 0;
+}
+
+- (uint64_t)ziptell {
+    return callback_file_pos;
+}
+
+- (void)zipclose {
+    if ([self.io_delegate respondsToSelector:@selector(zipArchiveDidClose)]) {
+        [self.io_delegate zipArchiveDidClose];
+    }
 }
 
 @end
