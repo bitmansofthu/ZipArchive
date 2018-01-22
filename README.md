@@ -14,6 +14,7 @@ ZipArchive is a simple utility class for zipping and unzipping files on iOS, mac
 - Zip-up NSData instances. (with a filename)
 
 This fork adds the ability to handle output of ZipArchive as NSData chunks and stream it over network or so.
+It also provides manual access to zip entries for large files.
 
 ## Installation and Setup
 
